@@ -1357,9 +1357,7 @@ function whiteStarOutline() {
   off.height = size;
   const c = off.getContext("2d");
 
-  // Background white
-  c.fillStyle = "white";
-  c.fillRect(0, 0, size, size);
+  // ⭐ No background fill — stays transparent
 
   // Draw a star outline
   c.strokeStyle = "black";
@@ -1758,6 +1756,7 @@ updateFloatingButton();
 
 </body>
 </html>
+
 
 
 
