@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Body Overlay with 9 Patterns + Clean Selection</title>
+<title>Body Overlay with 11 Patterns + Clean Selection</title>
 <style>
 /* ============================
    TOP FORM HEADER
@@ -393,6 +393,8 @@
 <div style="display:flex; gap:10px; margin-bottom:10px;">
 <button id="modeToggle">Switch to Select Mode</button>
 <button id="savePdfBtn">Save as PDF</button>
+<button id="savePngBtn">Download PNG</button>
+<button id="copyPngBtn">Copy to Clipboard</button>
 </div>
 
 <div id="svg-layout">
@@ -935,9 +937,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <script>
-/* -----------------------------------------
-   Overlay input text for PDF rendering
------------------------------------------ */
+// -----------------------------
+// Overlay input text for PDF
+// -----------------------------
 function prepareInputsForCanvas() {
   const wrapper = document.getElementById("pdf-wrapper");
   const inputs = document.querySelectorAll("input.line-input");
@@ -960,10 +962,9 @@ function cleanupInputOverlays() {
   document.querySelectorAll(".input-overlay").forEach(el => el.remove());
 }
 
-
-/* -----------------------------------------
-   TEMP FIX: Prevent canvas shifting in PDF
------------------------------------------ */
+// -----------------------------
+// TEMP FIX: Prevent canvas shifting in PDF
+// -----------------------------
 function prepareForPdf() {
   const container = document.getElementById("svg-container");
 
@@ -981,10 +982,9 @@ function restoreAfterPdf() {
   container.style.transition = container.dataset.origTransition || "";
 }
 
-
-/* -----------------------------------------
-   WIDTH LOCKING FOR PDF EXPORT
------------------------------------------ */
+// -----------------------------
+// WIDTH LOCKING FOR PDF EXPORT
+// -----------------------------
 function lockPdfLayout() {
   const layout = document.getElementById("svg-layout");
   const legend = document.getElementById("legend");
@@ -1001,18 +1001,10 @@ function unlockPdfLayout() {
   legend.classList.remove("legend-lock");
 }
 
-
-/* -----------------------------------------
-   EXPORT TO PDF
------------------------------------------ */
-async function exportToPDF() {
-  console.log("Export button clicked");
-
-  document.querySelectorAll("input.line-input").forEach(el => {
-    el.classList.add("hide-for-pdf");
-  });
-  document.getElementById("resetZoomBtn").classList.add("hide-for-pdf");
-
+// -----------------------------
+// High-res canvas for export
+// -----------------------------
+async function renderHighResCanvas() {
   prepareInputsForCanvas();
   prepareForPdf();
 
@@ -1035,8 +1027,6 @@ async function exportToPDF() {
   svgContainer.classList.add("shrink-svg-for-pdf");
   svgContainer.classList.add("scale-up-for-pdf");
 
-
-  /* ⭐ Lock only the SVG layout + legend */
   lockPdfLayout();
 
   const canvas = await html2canvas(wrapper, {
@@ -1044,7 +1034,6 @@ async function exportToPDF() {
     useCORS: true
   });
 
-  /* ⭐ Unlock after capture */
   unlockPdfLayout();
 
   layout.style.display = layout.dataset.origDisplay || "";
@@ -1058,7 +1047,6 @@ async function exportToPDF() {
   svgContainer.classList.remove("shrink-svg-for-pdf");
   svgContainer.classList.remove("scale-up-for-pdf");
 
-
   restoreAfterPdf();
   cleanupInputOverlays();
 
@@ -1066,6 +1054,16 @@ async function exportToPDF() {
     el.classList.remove("hide-for-pdf");
   });
   document.getElementById("resetZoomBtn").classList.remove("hide-for-pdf");
+
+  return canvas;
+}
+
+// -----------------------------
+// EXPORT TO PDF
+// -----------------------------
+async function exportToPDF() {
+  const canvas = await renderHighResCanvas();
+  lastRenderedCanvas = canvas;
 
   const imgData = canvas.toDataURL("image/png");
   const { jsPDF } = window.jspdf;
@@ -1079,33 +1077,42 @@ async function exportToPDF() {
   pdf.save("body-map.pdf");
 }
 
-</script>
+// -----------------------------
+// Copy image to clipboard helper
+// -----------------------------
+async function copyImageToClipboard(dataUrl) {
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const item = new ClipboardItem({ [blob.type]: blob });
+    await navigator.clipboard.write([item]);
+  } catch (err) {
+    console.error("Clipboard copy failed:", err);
+  }
+}
 
+// -----------------------------
+// GLOBAL STATE
+// -----------------------------
+let lastRenderedCanvas = null;
+let allData = [];
+let polygons = [];
+let drawMode = true;
+let currentPattern = null;
+let drawing = false;
+let currentStroke = [];
+let selectedParts = [];
+let currentScale = 1;
+let lastScale = 1;
 
-<script>
+// -----------------------------
+// MAIN INIT
+// -----------------------------
 window.addEventListener("load", () => {
-
-  // Body SVG reference (updated)
+  // Body SVG reference
   window.bodySVG = document.getElementById("bodySVG");
 
-  // PDF button listener
-  document.getElementById("savePdfBtn").addEventListener("click", exportToPDF);
-
-  // Your entire initialization block goes here
-  let allData = [];
-  fetch("data.json")
-    .then(res => res.json())
-    .then(data => { allData = data; });
-
-  let polygons = [];
-  let drawMode = true;
-  let currentPattern = null;
-  let drawing = false, currentStroke = [];
-  let selectedParts = [];
-  
-  let currentScale = 1;
-  let lastScale = 1;
-
+  // DOM references
   const canvas = document.getElementById("drawCanvas");
   const ctx = canvas.getContext("2d");
   const svg = document.getElementById("bodySVG");
@@ -1116,67 +1123,78 @@ window.addEventListener("load", () => {
   const undoLastBtn = document.getElementById("undoLast");
   const clearSelectionBtn = document.getElementById("clearSelection");
   const info = document.getElementById("info");
+  const resetBtn = document.getElementById("resetZoomBtn");
 
-  // Define the order of body part IDs exactly as they appear in your spreadsheet
+  // Expose some to outer scope functions that already reference them
+  window._drawCtx = ctx;
+  window._drawCanvas = canvas;
+  window._svg = svg;
+  window._svgContainer = svgContainer;
+
+  // Load data
+  fetch("data.json")
+    .then(res => res.json())
+    .then(data => { allData = data; });
+
+  // Order of body parts
   const partOrder = [
-  "face_anterior_head",
-  "posterior_head",
-  "anterior_neck",
-  "posterior_neck",
-  "anterior_left_upper_arm",
-  "posterior_left_upper_arm",
-  "anterior_left_forearm",
-  "posterior_left_forearm",
-  "anterior_left_palm",
-  "posterior_left_dorsal_hand",
-  "anterior_left_phalanges",
-  "posterior_left_phalanges",
-  "anterior_left_thumb",
-  "posterior_left_thumb",
-  "anterior_right_upper_arm",
-  "posterior_right_upper_arm",
-  "anterior_right_forearm",
-  "posterior_right_forearm",
-  "anterior_right_palm",
-  "posterior_right_dorsal_hand",
-  "anterior_right_phalanges",
-  "posterior_right_phalanges",
-  "anterior_right_thumb",
-  "posterior_right_thumb",
-  "anterior_trunk",
-  "posterior_trunk",
-  "left_buttock",
-  "right_buttock",
-  "anterior_left_thigh",
-  "posterior_left_thigh",
-  "left_medial_thigh",
-  "left_periarea",
-  "left_lateral_thigh",
-  "anterior_left_leg",
-  "posterior_left_calf",
-  "anterior_left_foot",
-  "plantar_left_foot",
-  "left_medial_leg",
-  "left_lateral_leg",
-  "left_medial_malleolus",
-  "left_lateral_malleolus",
-  "anterior_right_thigh",
-  "posterior_right_thigh",
-  "right_medial_thigh",
-  "right_periarea",
-  "right_lateral_thigh",
-  "anterior_right_leg",
-  "posterior_right_calf",
-  "anterior_right_foot",
-  "plantar_right_foot",
-  "right_medial_leg",
-  "right_lateral_leg",
-  "right_medial_malleolus",
-  "right_lateral_malleolus",
-  
- ];
+    "face_anterior_head",
+    "posterior_head",
+    "anterior_neck",
+    "posterior_neck",
+    "anterior_left_upper_arm",
+    "posterior_left_upper_arm",
+    "anterior_left_forearm",
+    "posterior_left_forearm",
+    "anterior_left_palm",
+    "posterior_left_dorsal_hand",
+    "anterior_left_phalanges",
+    "posterior_left_phalanges",
+    "anterior_left_thumb",
+    "posterior_left_thumb",
+    "anterior_right_upper_arm",
+    "posterior_right_upper_arm",
+    "anterior_right_forearm",
+    "posterior_right_forearm",
+    "anterior_right_palm",
+    "posterior_right_dorsal_hand",
+    "anterior_right_phalanges",
+    "posterior_right_phalanges",
+    "anterior_right_thumb",
+    "posterior_right_thumb",
+    "anterior_trunk",
+    "posterior_trunk",
+    "left_buttock",
+    "right_buttock",
+    "anterior_left_thigh",
+    "posterior_left_thigh",
+    "left_medial_thigh",
+    "left_periarea",
+    "left_lateral_thigh",
+    "anterior_left_leg",
+    "posterior_left_calf",
+    "anterior_left_foot",
+    "plantar_left_foot",
+    "left_medial_leg",
+    "left_lateral_leg",
+    "left_medial_malleolus",
+    "left_lateral_malleolus",
+    "anterior_right_thigh",
+    "posterior_right_thigh",
+    "right_medial_thigh",
+    "right_periarea",
+    "right_lateral_thigh",
+    "anterior_right_leg",
+    "posterior_right_calf",
+    "anterior_right_foot",
+    "plantar_right_foot",
+    "right_medial_leg",
+    "right_lateral_leg",
+    "right_medial_malleolus",
+    "right_lateral_malleolus"
+  ];
 
-  // Resize canvas
+  // Resize canvas to match SVG
   function resizeCanvas() {
     const rect = svg.getBoundingClientRect();
     canvas.width = Math.round(rect.width);
@@ -1186,9 +1204,9 @@ window.addEventListener("load", () => {
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
 
-  // ============================
+  // ---------------------------
   // Pattern creators
-  // ============================
+  // ---------------------------
   function stripe(color) {
     const c = document.createElement("canvas");
     c.width = 12; c.height = 12;
@@ -1234,7 +1252,7 @@ window.addEventListener("load", () => {
     return p.createPattern(c, "repeat");
   }
 
-  // BW patterns (white parts now fully opaque)
+  // BW patterns
   function stripeBW() {
     const c = document.createElement("canvas");
     c.width = 20; c.height = 20;
@@ -1354,120 +1372,111 @@ window.addEventListener("load", () => {
     p.fillRect(0, 0, c.width, c.height);
     return p.createPattern(c, "repeat");
   }
-function whiteStarOutline() {
-  const size = 20;
-  const off = document.createElement("canvas");
-  off.width = size;
-  off.height = size;
-  const c = off.getContext("2d");
 
-  // ⭐ No background fill — stays transparent
+  function whiteStarOutline() {
+    const size = 20;
+    const off = document.createElement("canvas");
+    off.width = size;
+    off.height = size;
+    const c = off.getContext("2d");
 
-  // Draw a star outline
-  c.strokeStyle = "black";
-  c.lineWidth = 1.2;
-  c.beginPath();
+    c.strokeStyle = "black";
+    c.lineWidth = 1.2;
+    c.beginPath();
 
-  const cx = size / 2;
-  const cy = size / 2;
-  const outer = 7;
-  const inner = 3;
+    const cx = size / 2;
+    const cy = size / 2;
+    const outer = 7;
+    const inner = 3;
 
-  for (let i = 0; i < 5; i++) {
-    const angleOuter = (Math.PI * 2 * i) / 5 - Math.PI / 2;
-    const angleInner = angleOuter + Math.PI / 5;
+    for (let i = 0; i < 5; i++) {
+      const angleOuter = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+      const angleInner = angleOuter + Math.PI / 5;
 
-    const xOuter = cx + outer * Math.cos(angleOuter);
-    const yOuter = cy + outer * Math.sin(angleOuter);
-    const xInner = cx + inner * Math.cos(angleInner);
-    const yInner = cy + inner * Math.sin(angleInner);
+      const xOuter = cx + outer * Math.cos(angleOuter);
+      const yOuter = cy + outer * Math.sin(angleOuter);
+      const xInner = cx + inner * Math.cos(angleInner);
+      const yInner = cy + inner * Math.sin(angleInner);
 
-    if (i === 0) c.moveTo(xOuter, yOuter);
-    else c.lineTo(xOuter, yOuter);
+      if (i === 0) c.moveTo(xOuter, yOuter);
+      else c.lineTo(xOuter, yOuter);
 
-    c.lineTo(xInner, yInner);
+      c.lineTo(xInner, yInner);
+    }
+
+    c.closePath();
+    c.stroke();
+
+    return c.createPattern(off, "repeat");
   }
 
-  c.closePath();
-  c.stroke();
+  function meshedSpray() {
+    const size = 20;
+    const cell = 10;
+    const c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    const p = c.getContext("2d");
 
-  return c.createPattern(off, "repeat");
-}
-function meshedSpray() {
-  const size = 20;
-  const cell = 10;
-  const c = document.createElement("canvas");
-  c.width = size;
-  c.height = size;
-  const p = c.getContext("2d");
+    // PASS 1: full dark grid
+    p.strokeStyle = "black";
+    p.lineWidth = 1;
 
-  // --- PASS 1: Draw full dark grid ---
-  p.strokeStyle = "black";
-  p.lineWidth = 1;
+    for (let i = 0; i <= size; i += cell) {
+      p.beginPath();
+      p.moveTo(i, 0);
+      p.lineTo(i, size);
+      p.stroke();
 
-  for (let i = 0; i <= size; i += cell) {
-    // vertical
+      p.beginPath();
+      p.moveTo(0, i);
+      p.lineTo(size, i);
+      p.stroke();
+    }
+
+    // PASS 2: erase center lines
+    p.globalCompositeOperation = "destination-out";
+    p.lineWidth = 2;
+
     p.beginPath();
-    p.moveTo(i, 0);
-    p.lineTo(i, size);
+    p.moveTo(size / 2, 0);
+    p.lineTo(size / 2, size);
     p.stroke();
 
-    // horizontal
     p.beginPath();
-    p.moveTo(0, i);
-    p.lineTo(size, i);
+    p.moveTo(0, size / 2);
+    p.lineTo(size, size / 2);
     p.stroke();
+
+    p.globalCompositeOperation = "source-over";
+
+    // PASS 3: faint center lines
+    p.strokeStyle = "rgba(0,0,0,0.35)";
+    p.lineWidth = 1;
+
+    p.beginPath();
+    p.moveTo(size / 2, 0);
+    p.lineTo(size / 2, size);
+    p.stroke();
+
+    p.beginPath();
+    p.moveTo(0, size / 2);
+    p.lineTo(size, size / 2);
+    p.stroke();
+
+    // PASS 4: S in center
+    p.font = "bold 10px Arial";
+    p.textAlign = "center";
+    p.textBaseline = "middle";
+    p.fillStyle = "black";
+    p.fillText("S", size / 2, size / 2);
+
+    return p.createPattern(c, "repeat");
   }
 
-  // --- PASS 2: ERASE the two center lines so they can be faint ---
-  p.globalCompositeOperation = "destination-out";
-  p.lineWidth = 2; // slightly thicker to fully clear the dark line
-
-  // erase vertical center line
-  p.beginPath();
-  p.moveTo(size / 2, 0);
-  p.lineTo(size / 2, size);
-  p.stroke();
-
-  // erase horizontal center line
-  p.beginPath();
-  p.moveTo(0, size / 2);
-  p.lineTo(size, size / 2);
-  p.stroke();
-
-  // restore normal drawing mode
-  p.globalCompositeOperation = "source-over";
-
-  // --- PASS 3: Draw faint center lines ---
-  p.strokeStyle = "rgba(0,0,0,0.35)";
-  p.lineWidth = 1;
-
-  // faint vertical
-  p.beginPath();
-  p.moveTo(size / 2, 0);
-  p.lineTo(size / 2, size);
-  p.stroke();
-
-  // faint horizontal
-  p.beginPath();
-  p.moveTo(0, size / 2);
-  p.lineTo(size, size / 2);
-  p.stroke();
-
-  // --- PASS 4: Draw clean black S ---
-  p.font = "bold 10px Arial";
-  p.textAlign = "center";
-  p.textBaseline = "middle";
-  p.fillStyle = "black";
-
-  p.fillText("S", size / 2, size / 2);
-
-  return p.createPattern(c, "repeat");
-}
-
-
-
-
+  // ---------------------------
+  // Pattern map + names
+  // ---------------------------
   const patterns = {
     stripes: stripe("black"),
     dots: dot("black"),
@@ -1484,8 +1493,8 @@ function meshedSpray() {
     starsWhite: starsWhite(),
     starBW: starBW(),
     polkaBW: polkaBW(),
-	whiteStarOutline: whiteStarOutline(),
-	meshedSpray: meshedSpray()
+    whiteStarOutline: whiteStarOutline(),
+    meshedSpray: meshedSpray()
   };
 
   const prettyNames = {
@@ -1504,11 +1513,13 @@ function meshedSpray() {
     starsWhite: "Autograft ASCS Alone",
     starBW: "Autograft STSG + ASCS",
     polkaBW: "Autograft Sheet",
-	whiteStarOutline: "Autograft Spray",
-	meshedSpray: "Meshed STSG + Autograft Spray"
+    whiteStarOutline: "Autograft Spray",
+    meshedSpray: "Meshed STSG + Autograft Spray"
   };
 
+  // ---------------------------
   // Pattern selection
+  // ---------------------------
   window.setPattern = function(name) {
     currentPattern = patterns[name];
 
@@ -1527,7 +1538,9 @@ function meshedSpray() {
     if (activeButton) activeButton.classList.add("active");
   };
 
+  // ---------------------------
   // Swatch rendering
+  // ---------------------------
   function renderSwatches() {
     document.querySelectorAll(".legend-item canvas[data-name]").forEach(swatchCanvas => {
       const name = swatchCanvas.dataset.name;
@@ -1558,19 +1571,23 @@ function meshedSpray() {
     });
   }
 
+  // ---------------------------
   // Mode toggle
+  // ---------------------------
   function enableDrawMode() {
     drawMode = true;
     canvas.style.pointerEvents = "auto";
     toggleBtn.textContent = "Switch to Select Mode";
     toggleBtn2.textContent = "Switch to Select Mode";
   }
+
   function enableSelectMode() {
     drawMode = false;
     canvas.style.pointerEvents = "none";
     toggleBtn.textContent = "Switch to Draw Mode";
     toggleBtn2.textContent = "Switch to Draw Mode";
   }
+
   [toggleBtn, toggleBtn2].forEach(btn => {
     if (btn) {
       btn.addEventListener("click", () => {
@@ -1580,17 +1597,19 @@ function meshedSpray() {
     }
   });
 
-  // Drawing events
+  // ---------------------------
+  // Drawing events (mouse)
+  // ---------------------------
   canvas.addEventListener("mousedown", e => {
     if (!drawMode) return;
     drawing = true;
-    currentStroke = [{x:e.offsetX, y:e.offsetY}];
+    currentStroke = [{ x: e.offsetX, y: e.offsetY }];
     redraw();
   });
 
   canvas.addEventListener("mousemove", e => {
     if (!drawMode || !drawing) return;
-    currentStroke.push({x:e.offsetX, y:e.offsetY});
+    currentStroke.push({ x: e.offsetX, y: e.offsetY });
     redraw();
   });
 
@@ -1598,116 +1617,109 @@ function meshedSpray() {
     if (!drawMode) return;
     drawing = false;
     if (currentStroke.length > 2) {
-      polygons.push({points: currentStroke.slice(), pattern: currentPattern});
+      polygons.push({ points: currentStroke.slice(), pattern: currentPattern });
       redraw();
     }
     currentStroke = [];
   });
- /* ============================
-   TOUCH SUPPORT FOR MOBILE
-   ============================ */
-   let lastTapTime = 0;
 
+  // ---------------------------
+  // TOUCH SUPPORT FOR MOBILE
+  // ---------------------------
+  let lastTapTime = 0;
 
-// Prevent scrolling and zooming while drawing
-canvas.addEventListener("touchstart", function(e) {
-  if (!drawMode) return;
+  canvas.addEventListener("touchstart", function(e) {
+    if (!drawMode) return;
 
-  const now = Date.now();
-  const timeSince = now - lastTapTime;
+    const now = Date.now();
+    const timeSince = now - lastTapTime;
 
-  // ⭐ Detect double‑tap BEFORE drawing starts
-  if (timeSince < 300 && timeSince > 0) {
-    e.preventDefault();
-    resetZoom();
+    // double-tap to reset zoom
+    if (timeSince < 300 && timeSince > 0) {
+      e.preventDefault();
+      resetZoom();
+      lastTapTime = now;
+      return;
+    }
+
     lastTapTime = now;
-    return; // ⭐ Prevent drawing dots
-  }
 
-  lastTapTime = now;
-
-  // --- existing drawing logic ---
-  e.preventDefault();
-  const touch = e.touches[0];
-  const rect = canvas.getBoundingClientRect();
-  const x = touch.clientX - rect.left;
-  const y = touch.clientY - rect.top;
-
-  drawing = true;
-  currentStroke = [{ x, y }];
-  redraw();
-}, { passive: false });
-
-
-canvas.addEventListener("touchmove", e => {
-  if (!drawMode || !drawing) return;
-  e.preventDefault();
-  const touch = e.touches[0];
-  const rect = canvas.getBoundingClientRect();
-  const x = touch.clientX - rect.left;
-  const y = touch.clientY - rect.top;
-
-  currentStroke.push({ x, y });
-  redraw();
-}, { passive: false });
-
-
-canvas.addEventListener("touchend", function(e) {
-  const now = Date.now();
-  const timeSince = now - lastTapTime;
-
-  // ⭐ Detect double‑tap BEFORE finishing a stroke
-  if (timeSince < 300 && timeSince > 0) {
     e.preventDefault();
-    resetZoom();
-    lastTapTime = now;
-    drawing = false;
-    currentStroke = [];
-    return;
-  }
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
 
-  lastTapTime = now;
-
-  // --- existing drawing logic ---
-  if (!drawMode) return;
-  e.preventDefault();
-  drawing = false;
-
-  if (currentStroke.length > 2) {
-    polygons.push({
-      points: currentStroke.slice(),
-      pattern: currentPattern
-    });
+    drawing = true;
+    currentStroke = [{ x, y }];
     redraw();
+  }, { passive: false });
+
+  canvas.addEventListener("touchmove", e => {
+    if (!drawMode || !drawing) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+
+    currentStroke.push({ x, y });
+    redraw();
+  }, { passive: false });
+
+  canvas.addEventListener("touchend", function(e) {
+    const now = Date.now();
+    const timeSince = now - lastTapTime;
+
+    if (timeSince < 300 && timeSince > 0) {
+      e.preventDefault();
+      resetZoom();
+      lastTapTime = now;
+      drawing = false;
+      currentStroke = [];
+      return;
+    }
+
+    lastTapTime = now;
+
+    if (!drawMode) return;
+    e.preventDefault();
+    drawing = false;
+
+    if (currentStroke.length > 2) {
+      polygons.push({
+        points: currentStroke.slice(),
+        pattern: currentPattern
+      });
+      redraw();
+    }
+
+    currentStroke = [];
+  });
+
+  // Block synthetic mouse events on mobile
+  ["click", "mousedown", "mouseup"].forEach(evt => {
+    canvas.addEventListener(evt, e => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+
+  // ---------------------------
+  // Zoom reset
+  // ---------------------------
+  function resetZoom() {
+    lastScale = currentScale;
+    currentScale = 1;
+    svgContainer.style.transform = "scale(1)";
   }
 
-  currentStroke = [];
-});
-
-
-// ⭐ Block all synthetic mouse events (critical for mobile)
-["click", "mousedown", "mouseup"].forEach(evt => {
-  canvas.addEventListener(evt, e => {
-    e.preventDefault();
-    e.stopPropagation();
-  });
-});
-
-
-// ⭐ Correct resetZoom function
-function resetZoom() {
-  lastScale = currentScale;
-  currentScale = 1;
-
-  // ⭐ Smooth animated reset
-  svgContainer.style.transform = "scale(1)";
-}
-
-
-
-
-
-  clearCanvasBtn.addEventListener("click", () => { polygons = []; redraw(); 
+  // ---------------------------
+  // Clear / Undo
+  // ---------------------------
+  clearCanvasBtn.addEventListener("click", () => {
+    polygons = [];
+    redraw();
   });
 
   undoLastBtn.addEventListener("click", () => {
@@ -1717,7 +1729,9 @@ function resetZoom() {
     }
   });
 
+  // ---------------------------
   // Selection logic
+  // ---------------------------
   svg.addEventListener("click", (e) => {
     if (drawMode) return;
     const el = e.target.closest("path");
@@ -1783,59 +1797,90 @@ function resetZoom() {
     }
   }
 
-  function redraw(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    polygons.forEach(poly=>{
+  // ---------------------------
+  // Redraw polygons + stroke
+  // ---------------------------
+  function redraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    polygons.forEach(poly => {
       ctx.beginPath();
-      poly.points.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
+      poly.points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
       ctx.closePath();
       ctx.fillStyle = poly.pattern || "rgba(0,0,0,0.1)";
       ctx.fill();
       ctx.strokeStyle = "rgba(0,0,0,0.4)";
       ctx.stroke();
     });
-    if(drawing && currentStroke.length>0){
+    if (drawing && currentStroke.length > 0) {
       ctx.beginPath();
-      currentStroke.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
-      ctx.strokeStyle="black"; ctx.lineWidth=2; ctx.stroke();
+      currentStroke.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
   }
 
+  // ---------------------------
   // Initial state
-renderSwatches();
-setPattern("stripes");
-enableDrawMode();
-redraw();
+  // ---------------------------
+  renderSwatches();
+  setPattern("stripes");
+  enableDrawMode();
+  redraw();
 
-// ⭐ Floating reset button logic — this must be BEFORE the final })
-const resetBtn = document.getElementById("resetZoomBtn");
+  // ---------------------------
+  // Floating reset button
+  // ---------------------------
+  function updateFloatingButton() {
+    const vv = window.visualViewport;
+    resetBtn.style.left =
+      (vv.width - resetBtn.offsetWidth - 20 + vv.offsetLeft) + "px";
+    resetBtn.style.top =
+      (vv.height - resetBtn.offsetHeight - 20 + vv.offsetTop) + "px";
 
-function updateFloatingButton() {
-  const vv = window.visualViewport;
+    const scale = 1 / vv.scale;
+    resetBtn.style.transform = `translateZ(0) scale(${scale})`;
+  }
 
-  // Position the button relative to the visual viewport
-  resetBtn.style.left =
-    (vv.width - resetBtn.offsetWidth - 20 + vv.offsetLeft) + "px";
-  resetBtn.style.top =
-    (vv.height - resetBtn.offsetHeight - 20 + vv.offsetTop) + "px";
+  window.visualViewport.addEventListener("scroll", updateFloatingButton);
+  window.visualViewport.addEventListener("resize", updateFloatingButton);
+  updateFloatingButton();
 
-  // ⭐ Keep the button the same size even when zoomed
-  const scale = 1 / vv.scale;
-  resetBtn.style.transform = `translateZ(0) scale(${scale})`;
-}
+  // ---------------------------
+  // Export buttons
+  // ---------------------------
+  document.getElementById("savePdfBtn").addEventListener("click", exportToPDF);
 
-window.visualViewport.addEventListener("scroll", updateFloatingButton);
-window.visualViewport.addEventListener("resize", updateFloatingButton);
-updateFloatingButton();
+  document.getElementById("savePngBtn").addEventListener("click", async () => {
+    const canvasExport = await renderHighResCanvas();
+    lastRenderedCanvas = canvasExport;
 
-// ⭐ Now close your DOMContentLoaded or wrapper
-})
+    const link = document.createElement("a");
+    link.download = "body-map.png";
+    link.href = canvasExport.toDataURL("image/png");
+    link.click();
+  });
 
+  document.getElementById("copyPngBtn").addEventListener("click", async () => {
+    const canvasExport = await renderHighResCanvas();
+    lastRenderedCanvas = canvasExport;
 
+    const dataUrl = canvasExport.toDataURL("image/png");
+    copyImageToClipboard(dataUrl);
+  });
+});
 </script>
+
 
 </body>
 </html>
+
+
+
+
+
+
+
 
 
 
