@@ -913,6 +913,11 @@
   		<button onclick="setPattern('whiteStarOutline')">Autograft Spray</button>
   		<canvas data-name="whiteStarOutline" width="30" height="30"></canvas>
 	</div>
+	  <div class="legend-item">
+  <button onclick="setPattern('meshedSpray')">Meshed STSG + Autograft Spray</button>
+  <canvas data-name="meshedSpray" width="30" height="30"></canvas>
+</div>
+
 
              
 </div> <!-- closes svg-layout -->
@@ -1388,6 +1393,80 @@ function whiteStarOutline() {
 
   return c.createPattern(off, "repeat");
 }
+function meshedSpray() {
+  const size = 20;
+  const cell = 10;
+  const c = document.createElement("canvas");
+  c.width = size;
+  c.height = size;
+  const p = c.getContext("2d");
+
+  // --- PASS 1: Draw full dark grid ---
+  p.strokeStyle = "black";
+  p.lineWidth = 1;
+
+  for (let i = 0; i <= size; i += cell) {
+    // vertical
+    p.beginPath();
+    p.moveTo(i, 0);
+    p.lineTo(i, size);
+    p.stroke();
+
+    // horizontal
+    p.beginPath();
+    p.moveTo(0, i);
+    p.lineTo(size, i);
+    p.stroke();
+  }
+
+  // --- PASS 2: ERASE the two center lines so they can be faint ---
+  p.globalCompositeOperation = "destination-out";
+  p.lineWidth = 2; // slightly thicker to fully clear the dark line
+
+  // erase vertical center line
+  p.beginPath();
+  p.moveTo(size / 2, 0);
+  p.lineTo(size / 2, size);
+  p.stroke();
+
+  // erase horizontal center line
+  p.beginPath();
+  p.moveTo(0, size / 2);
+  p.lineTo(size, size / 2);
+  p.stroke();
+
+  // restore normal drawing mode
+  p.globalCompositeOperation = "source-over";
+
+  // --- PASS 3: Draw faint center lines ---
+  p.strokeStyle = "rgba(0,0,0,0.35)";
+  p.lineWidth = 1;
+
+  // faint vertical
+  p.beginPath();
+  p.moveTo(size / 2, 0);
+  p.lineTo(size / 2, size);
+  p.stroke();
+
+  // faint horizontal
+  p.beginPath();
+  p.moveTo(0, size / 2);
+  p.lineTo(size, size / 2);
+  p.stroke();
+
+  // --- PASS 4: Draw clean black S ---
+  p.font = "bold 10px Arial";
+  p.textAlign = "center";
+  p.textBaseline = "middle";
+  p.fillStyle = "black";
+
+  p.fillText("S", size / 2, size / 2);
+
+  return p.createPattern(c, "repeat");
+}
+
+
+
 
   const patterns = {
     stripes: stripe("black"),
@@ -1405,7 +1484,8 @@ function whiteStarOutline() {
     starsWhite: starsWhite(),
     starBW: starBW(),
     polkaBW: polkaBW(),
-	whiteStarOutline: whiteStarOutline()
+	whiteStarOutline: whiteStarOutline(),
+	meshedSpray: meshedSpray()
   };
 
   const prettyNames = {
@@ -1424,7 +1504,8 @@ function whiteStarOutline() {
     starsWhite: "Autograft ASCS Alone",
     starBW: "Autograft STSG + ASCS",
     polkaBW: "Autograft Sheet",
-	whiteStarOutline: "Autograft Spray"
+	whiteStarOutline: "Autograft Spray",
+	meshedSpray: "Meshed STSG + Autograft Spray"
   };
 
   // Pattern selection
@@ -1755,6 +1836,13 @@ updateFloatingButton();
 
 </body>
 </html>
+
+
+
+
+
+
+
 
 
 
